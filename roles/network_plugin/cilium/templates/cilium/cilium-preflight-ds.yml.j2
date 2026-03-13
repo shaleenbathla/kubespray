@@ -1,0 +1,89 @@
+#jinja2: trim_blocks: True, lstrip_blocks: True
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: cilium-pre-flight-check
+  namespace: kube-system
+  labels:
+    k8s-app: cilium-pre-flight-check
+spec:
+  selector:
+    matchLabels:
+      k8s-app: cilium-pre-flight-check
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        k8s-app: cilium-pre-flight-check
+    spec:
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  k8s-app: cilium
+              topologyKey: kubernetes.io/hostname
+      containers:
+        - name: cilium-pre-flight-check
+          image: "{{ cilium_image_repo }}:{{ cilium_image_tag }}"
+          imagePullPolicy: IfNotPresent
+          command:
+            - cilium-dbg
+          args:
+            - preflight
+            - fqdn-poller
+            - --k8s-api-server={{ kube_apiserver_global_endpoint }}
+{% if cilium_identity_allocation_mode == "kvstore" %}
+            - --kvstore=etcd
+            - --kvstore-opt=etcd.config=/var/lib/etcd-config/etcd.config
+{% endif %}
+          env:
+            - name: K8S_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: spec.nodeName
+            - name: CILIUM_K8S_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.namespace
+          livenessProbe:
+            exec:
+              command:
+                - cilium-dbg
+                - status
+                - --brief
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            timeoutSeconds: 5
+          readinessProbe:
+            exec:
+              command:
+                - cilium-dbg
+                - status
+                - --brief
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+          volumeMounts:
+            - name: cilium-run
+              mountPath: /var/run/cilium
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+      hostNetwork: true
+      restartPolicy: Always
+      priorityClassName: system-node-critical
+      serviceAccountName: cilium
+      terminationGracePeriodSeconds: 1
+      tolerations:
+        - operator: Exists
+      volumes:
+        - name: cilium-run
+          hostPath:
+            path: /var/run/cilium
+            type: DirectoryOrCreate

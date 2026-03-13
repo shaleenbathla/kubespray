@@ -1,0 +1,59 @@
+---
+# Cilium pre-flight check for upgrades
+# Ref: https://docs.cilium.io/en/stable/operations/upgrade/#running-pre-flight-check-required
+- name: Cilium Preflight | Render preflight DaemonSet manifest
+  template:
+    src: cilium/cilium-preflight-ds.yml.j2
+    dest: "{{ kube_config_dir }}/cilium-preflight-ds.yml"
+    mode: "0644"
+  when:
+    - inventory_hostname == groups['kube_control_plane'][0]
+
+- name: Cilium Preflight | Deploy preflight DaemonSet
+  command: "{{ kubectl }} apply -f {{ kube_config_dir }}/cilium-preflight-ds.yml"
+  when:
+    - inventory_hostname == groups['kube_control_plane'][0]
+
+- name: Cilium Preflight | Wait for preflight check pods to be ready
+  command: >
+    {{ kubectl }} -n kube-system wait
+    --for=condition=Ready
+    pod -l k8s-app=cilium-pre-flight-check
+    --timeout={{ cilium_preflight_timeout }}s
+  register: cilium_preflight_result
+  when:
+    - inventory_hostname == groups['kube_control_plane'][0]
+
+- name: Cilium Preflight | Verify no unready preflight pods remain
+  command: >
+    {{ kubectl }} -n kube-system get pods
+    -l k8s-app=cilium-pre-flight-check
+    -o jsonpath='{.items[?(@.status.phase!="Running")].metadata.name}'
+  register: cilium_preflight_unready
+  failed_when: cilium_preflight_unready.stdout | length > 0
+  when:
+    - inventory_hostname == groups['kube_control_plane'][0]
+
+- name: Cilium Preflight | Delete preflight DaemonSet
+  command: "{{ kubectl }} delete -f {{ kube_config_dir }}/cilium-preflight-ds.yml --ignore-not-found=true"
+  when:
+    - inventory_hostname == groups['kube_control_plane'][0]
+
+- name: Cilium Preflight | Wait for preflight pods to terminate
+  command: >
+    {{ kubectl }} -n kube-system get pods
+    -l k8s-app=cilium-pre-flight-check
+    -o jsonpath='{.items[*].metadata.name}'
+  register: cilium_preflight_pods
+  until: cilium_preflight_pods.stdout | length == 0
+  retries: 30
+  delay: 10
+  when:
+    - inventory_hostname == groups['kube_control_plane'][0]
+
+- name: Cilium Preflight | Clean up preflight manifest
+  file:
+    path: "{{ kube_config_dir }}/cilium-preflight-ds.yml"
+    state: absent
+  when:
+    - inventory_hostname == groups['kube_control_plane'][0]

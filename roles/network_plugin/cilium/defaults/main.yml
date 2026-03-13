@@ -358,6 +358,12 @@ cilium_certgen_args:
 cilium_enable_host_firewall: false
 cilium_policy_audit_mode: false
 
+# Cilium pre-flight check for upgrades
+# Ref: https://docs.cilium.io/en/stable/operations/upgrade/#running-pre-flight-check-required
+cilium_preflight_enabled: true
+# Timeout in seconds to wait for preflight pods to become ready
+cilium_preflight_timeout: 300
+
 # Cilium extra install flags
 cilium_install_extra_flags: ""
 
